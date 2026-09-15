@@ -1,0 +1,36 @@
+[package]
+name = "outcry"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "Single-writer, many-reader broadcast queue over shared memory: variable-length frames, readers never block the writer, a lagging reader is overrun and told so"
+repository = "https://github.com/anaxo-io/outcry"
+documentation = "https://docs.rs/outcry"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+keywords = ["shared-memory", "ipc", "spmc", "broadcast", "low-latency"]
+categories = ["concurrency", "data-structures", "os::unix-apis"]
+exclude = ["/.github", "/deny.toml", "/rust-toolchain.toml"]
+
+[dependencies]
+bytemuck = { version = "1.16", features = ["derive"] }
+memmap2 = "0.9"
+thiserror = "2.0"
+
+[dev-dependencies]
+proptest = "1.5"
+tempfile = "3"
+
+[features]
+default = []
+# Copy frames with `ptr::copy_nonoverlapping` instead of word-wise atomics. Faster, and
+# the same trade the original C++ makes: a read that races the writer is a data race in
+# the abstract machine, caught after the fact by the overrun check. See README.
+fast-copy = []
+
+[[bench]]
+name = "throughput"
+harness = false
+
+[package.metadata.docs.rs]
+all-features = true

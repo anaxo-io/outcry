@@ -1,6 +1,6 @@
 //! A reader. Any number may exist; each sees every frame.
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{fence, Ordering};
 use std::sync::Arc;
 
 use crate::copy;
@@ -124,8 +124,19 @@ impl Consumer {
             // passed `start + cap` at any point during the copy, some of those bytes may
             // have been rewritten under us and `out` cannot be trusted.
             //
+            // The fence matters. An acquire *load* orders only what comes after it; without
+            // the fence the copy above may legally be sunk below this check, and the check
+            // would then be testing nothing. With it, any data load that observed a byte
+            // of an overwriting frame synchronises with the writer's release fence, so the
+            // reservation covering that frame is visible here. In `fast-copy` mode the
+            // loads are not atomic and cannot take part in that synchronisation; the fence
+            // still pins the copy above the check at the compiler level, and the hardware
+            // does the rest on every platform this runs on. That is the trade the feature
+            // buys.
+            //
             // The original checks against the advanced position, which leaves a window of
             // one frame in which an overwrite of the frame's first bytes goes undetected.
+            fence(Ordering::Acquire);
             let reserved = self.map.reserved().load(Ordering::Acquire);
             if reserved.wrapping_sub(start) > cap {
                 return Err(self.mark_overrun(reserved));

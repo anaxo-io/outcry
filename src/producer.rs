@@ -1,6 +1,6 @@
 //! The single writer.
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{fence, Ordering};
 use std::sync::Arc;
 
 use crate::copy;
@@ -103,6 +103,12 @@ impl Producer {
                 .reserved()
                 .store(self.cached_reserved, Ordering::Release);
         }
+        // A release *store* orders the stores before it, not the data stores after it.
+        // This fence is what guarantees a reader that observes any byte of this frame
+        // will, after its own acquire fence, also observe the reservation that covers
+        // it — the property the overrun check depends on. (Boehm, "Can seqlocks get
+        // along with programming language memory models?", §4.)
+        fence(Ordering::Release);
 
         let base = self.map.buffer_ptr();
 

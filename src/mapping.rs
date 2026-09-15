@@ -13,12 +13,20 @@ use crate::layout::{
 /// A mapped queue region. Shared between the [`Queue`](crate::Queue) handle and every
 /// producer or consumer made from it.
 pub(crate) struct Mapping {
-    map: MmapMut,
+    /// Held only to keep the mapping alive; never dereferenced after construction.
+    _map: MmapMut,
+    /// The one pointer every access goes through. Taken from `as_mut_ptr()` while the
+    /// mapping was uniquely borrowed, so it carries write permission. Re-borrowing the
+    /// bytes through `&self._map[..]` would produce a read-only pointer, and writing
+    /// through that is undefined behaviour — Miri catches it, hardware does not.
+    base: *mut u8,
     capacity: u64,
 }
 
-// SAFETY: every access to the mapped bytes goes through atomics or through the copy
-// routines in `copy.rs`, which are the documented concurrency boundary of the crate.
+// SAFETY: `base` is a raw pointer, which is why these are not automatic. Every access to
+// the mapped bytes goes through atomics or through the copy routines in `copy.rs`, which
+// are the documented concurrency boundary of the crate; the pointer itself is never
+// mutated after construction.
 unsafe impl Send for Mapping {}
 unsafe impl Sync for Mapping {}
 
@@ -44,7 +52,12 @@ impl Mapping {
         // hazard of file-backed mappings and out of scope.
         let mut map = unsafe { MmapMut::map_mut(&file)? };
         map.fill(0);
-        let mut this = Self { map, capacity };
+        let base = map.as_mut_ptr();
+        let this = Self {
+            _map: map,
+            base,
+            capacity,
+        };
         this.write_header();
         Ok(this)
     }
@@ -54,8 +67,13 @@ impl Mapping {
         if !layout::capacity_ok(capacity) {
             return Err(Error::BadCapacity(capacity));
         }
-        let map = MmapMut::map_anon(Self::total_len(capacity))?;
-        let mut this = Self { map, capacity };
+        let mut map = MmapMut::map_anon(Self::total_len(capacity))?;
+        let base = map.as_mut_ptr();
+        let this = Self {
+            _map: map,
+            base,
+            capacity,
+        };
         this.write_header();
         Ok(this)
     }
@@ -71,7 +89,7 @@ impl Mapping {
             return Err(Error::BadHeader("file too small for a header"));
         }
         // SAFETY: as in `create`.
-        let map = unsafe { MmapMut::map_mut(&file)? };
+        let mut map = unsafe { MmapMut::map_mut(&file)? };
 
         let header: RawHeader =
             bytemuck::pod_read_unaligned(&map[..std::mem::size_of::<RawHeader>()]);
@@ -90,13 +108,15 @@ impl Mapping {
         if len < Self::total_len(header.capacity) {
             return Err(Error::BadHeader("file shorter than its declared capacity"));
         }
+        let base = map.as_mut_ptr();
         Ok(Self {
-            map,
+            _map: map,
+            base,
             capacity: header.capacity,
         })
     }
 
-    fn write_header(&mut self) {
+    fn write_header(&self) {
         let header = RawHeader {
             magic: 0, // written last, below, so a reader never sees a half-written header
             version: VERSION,
@@ -104,19 +124,21 @@ impl Mapping {
             capacity: self.capacity,
             _reserved: [0; 5],
         };
-        self.map[..std::mem::size_of::<RawHeader>()].copy_from_slice(bytemuck::bytes_of(&header));
+        let bytes = bytemuck::bytes_of(&header);
+        // SAFETY: `base` points at a mapping of at least `BUFFER_OFFSET` bytes, we hold
+        // the only handle, and nothing else has been given a pointer yet.
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), self.base, bytes.len()) };
         // Publish the magic with a release store so the rest of the header is visible to
         // anyone who observes it.
         self.magic().store(MAGIC, Ordering::Release);
     }
 
     fn atomic_at(&self, offset: usize) -> &AtomicU64 {
-        let ptr = self.map[offset..offset + 8].as_ptr();
-        debug_assert_eq!(ptr as usize % 8, 0);
+        debug_assert!(offset + 8 <= BUFFER_OFFSET);
         // SAFETY: the offset is 8-aligned (all three are multiples of 64 into a page-aligned
-        // mapping), in bounds, and `AtomicU64` has the same layout as `u64`. The mapping
-        // outlives the returned reference.
-        unsafe { &*(ptr as *const AtomicU64) }
+        // mapping), in bounds, `AtomicU64` has the same layout as `u64`, and `base` carries
+        // write permission. The mapping outlives the returned reference.
+        unsafe { &*(self.base.add(offset) as *const AtomicU64) }
     }
 
     pub(crate) fn magic(&self) -> &AtomicU64 {
@@ -137,6 +159,7 @@ impl Mapping {
 
     /// Pointer to the first buffer byte. All ring arithmetic is relative to this.
     pub(crate) fn buffer_ptr(&self) -> *mut u8 {
-        self.map[BUFFER_OFFSET..].as_ptr() as *mut u8
+        // SAFETY: in bounds; the mapping is `BUFFER_OFFSET + capacity` bytes.
+        unsafe { self.base.add(BUFFER_OFFSET) }
     }
 }

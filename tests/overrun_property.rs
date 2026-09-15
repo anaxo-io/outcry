@@ -88,10 +88,12 @@ proptest! {
                     if accepted == 1 {
                         reader_started.store(true, Ordering::Release);
                     }
-                    // Every `stall_every` frames, stop reading until the writer is two
-                    // full rings ahead. The next read is then guaranteed to land in a
-                    // region the writer is actively rewriting.
-                    if accepted % stall_every == 0 && !done.load(Ordering::Acquire) {
+                    // Stop reading until the writer is two full rings ahead: right after
+                    // the first frame — when the writer provably has thousands of frames
+                    // left, so the lap cannot fail to happen whatever the scheduler does —
+                    // and then every `stall_every` frames. The next read after a stall is
+                    // guaranteed to land in a region the writer has rewritten.
+                    if accepted == 1 || (accepted % stall_every == 0 && !done.load(Ordering::Acquire)) {
                         let target = c.position() + 2 * CAP;
                         while writer_pos.load(Ordering::Acquire) < target && !done.load(Ordering::Acquire) {
                             std::hint::spin_loop();
@@ -124,7 +126,7 @@ proptest! {
         // and every stall that ran to completion left the reader provably lapped, so each
         // must have produced an overrun.
         prop_assert!(accepted > 0);
-        prop_assert!(lapped_on_purpose > 0, "the reader never managed to stall until lapped");
+        prop_assert!(lapped_on_purpose > 0, "the first stall must always complete: the writer had thousands of frames left");
         prop_assert!(overruns >= lapped_on_purpose,
             "reader was lapped {} times on purpose but saw only {} overruns", lapped_on_purpose, overruns);
     }

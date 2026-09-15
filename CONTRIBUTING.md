@@ -28,9 +28,11 @@ CI runs all of these plus an MSRV check against Rust 1.85 and `cargo deny check`
 
 ## What this crate is careful about
 
-- **`unsafe` is confined to two files.** `mapping.rs` owns the mapping and hands out
-  atomics; `copy.rs` moves bytes in and out of the ring. Every `unsafe` block states its
-  invariant in a `// SAFETY:` comment. Do not add a third file.
+- **`unsafe` has two homes and two callers.** The unsafe *functions* live in `mapping.rs`
+  (owns the mapping, hands out atomics) and `copy.rs` (moves bytes in and out of the
+  ring). `producer.rs` and `consumer.rs` call them, each call in an `unsafe {}` block with
+  a `// SAFETY:` comment naming the invariant that makes it sound. Nothing else may
+  contain the keyword; `grep -c unsafe src/*.rs` is part of review.
 - **The sound copy path must pass Miri.** It is the reason this crate exists as a Rust
   crate rather than a port. If a change makes Miri unhappy on the default features, the
   change is wrong, not Miri.

@@ -90,12 +90,22 @@ impl Mapping {
         }
         // SAFETY: as in `create`.
         let mut map = unsafe { MmapMut::map_mut(&file)? };
+        let base = map.as_mut_ptr();
 
-        let header: RawHeader =
-            bytemuck::pod_read_unaligned(&map[..std::mem::size_of::<RawHeader>()]);
-        if header.magic != MAGIC {
+        // The magic is the creator's release store; load it with acquire before reading
+        // anything else, so the rest of the header is visible if it is there at all.
+        // Everything below goes through `base` rather than `&map[..]`: a shared reborrow
+        // of the mapping would strip the pointer's write permission.
+        //
+        // SAFETY: offset 0 of a page-aligned mapping of at least `BUFFER_OFFSET` bytes is
+        // an 8-aligned in-bounds word, and `AtomicU64` has the same layout as `u64`.
+        let magic = unsafe { (*(base as *const AtomicU64)).load(Ordering::Acquire) };
+        if magic != MAGIC {
             return Err(Error::BadHeader("magic mismatch"));
         }
+        // SAFETY: the mapping is at least `BUFFER_OFFSET` bytes, which is larger than
+        // `RawHeader`, and `RawHeader` is `Pod`: every bit pattern is a valid value.
+        let header: RawHeader = unsafe { base.cast::<RawHeader>().read_unaligned() };
         if header.version != VERSION {
             return Err(Error::BadHeader("layout version mismatch"));
         }
@@ -108,12 +118,28 @@ impl Mapping {
         if len < Self::total_len(header.capacity) {
             return Err(Error::BadHeader("file shorter than its declared capacity"));
         }
-        let base = map.as_mut_ptr();
-        Ok(Self {
+        let this = Self {
             _map: map,
             base,
             capacity: header.capacity,
-        })
+        };
+
+        // The counters are live state, not layout, and everything downstream trusts
+        // them: a producer starts writing at `published` and a consumer starts reading
+        // there. An unaligned position makes every frame word an unaligned atomic, which
+        // is undefined behaviour reached through an entirely safe call. Refuse any pair
+        // the producer could not have left behind.
+        let published = this.published().load(Ordering::Acquire);
+        let reserved = this.reserved().load(Ordering::Acquire);
+        if published % FRAME_ALIGN as u64 != 0 || reserved % FRAME_ALIGN as u64 != 0 {
+            return Err(Error::BadHeader("position is not frame-aligned"));
+        }
+        if reserved < published || reserved - published > header.capacity {
+            return Err(Error::BadHeader(
+                "reservation does not cover the published end",
+            ));
+        }
+        Ok(this)
     }
 
     fn write_header(&self) {

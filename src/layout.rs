@@ -15,6 +15,11 @@
 
 use bytemuck::{Pod, Zeroable};
 
+/// Positions, lengths and the capacity are 64-bit on the page. A narrower `usize` would
+/// truncate them on the way into the pointer arithmetic, so the crate does not build
+/// where that is possible.
+const _: () = assert!(usize::BITS >= 64);
+
 /// Bytes at the front of the mapping identifying it as ours.
 pub const MAGIC: u64 = u64::from_le_bytes(*b"OUTCRY\x00\x01");
 /// Layout version. Bump when the on-page format changes.

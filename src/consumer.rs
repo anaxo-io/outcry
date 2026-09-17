@@ -103,17 +103,25 @@ impl Consumer {
                 continue;
             }
 
+            // Validate the length before doing arithmetic on it: `frame_size` rounds up
+            // to the frame alignment, which overflows near `u64::MAX`, and a length that
+            // cannot be real means we read a torn, stale or corrupt header.
             let len = header as usize;
+            if len > crate::layout::max_payload(cap) {
+                return Err(self.mark_overrun(reserved));
+            }
             let size = frame_size(len);
+            // The producer pads rather than straddle the end of the ring, so a frame that
+            // does not fit between here and the end was never written by one. Without
+            // this the copy below runs past the mapping.
+            if size > cap - idx as u64 {
+                return Err(self.mark_overrun(reserved));
+            }
             if len > out.len() {
                 return Err(Error::BufferTooSmall {
                     needed: len,
                     provided: out.len(),
                 });
-            }
-            if size > cap || len > crate::layout::max_payload(cap) {
-                // A length that cannot be real means we read a torn or stale header.
-                return Err(self.mark_overrun(reserved));
             }
 
             // SAFETY: the frame lies within the ring by the producer's construction; the
@@ -128,11 +136,7 @@ impl Consumer {
             // the fence the copy above may legally be sunk below this check, and the check
             // would then be testing nothing. With it, any data load that observed a byte
             // of an overwriting frame synchronises with the writer's release fence, so the
-            // reservation covering that frame is visible here. In `fast-copy` mode the
-            // loads are not atomic and cannot take part in that synchronisation; the fence
-            // still pins the copy above the check at the compiler level, and the hardware
-            // does the rest on every platform this runs on. That is the trade the feature
-            // buys.
+            // reservation covering that frame is visible here.
             //
             // The original checks against the advanced position, which leaves a window of
             // one frame in which an overwrite of the frame's first bytes goes undetected.

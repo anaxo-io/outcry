@@ -2,9 +2,9 @@
 //! messages per second.
 //!
 //! ```bash
-//! cargo bench --bench throughput                     # sound copy (default)
-//! cargo bench --bench throughput --features fast-copy
+//! cargo bench --bench throughput
 //! OUTCRY_READERS=1,2,4,8 OUTCRY_MESSAGES=5000000 cargo bench --bench throughput
+//! OUTCRY_PIN=0,1,2,3 cargo bench --bench throughput     # writer on 0, readers on 1..
 //! ```
 //!
 //! Each reader runs on its own thread, spinning on `try_read`. The producer writes
@@ -26,15 +26,11 @@ use std::time::Instant;
 
 use outcry::Queue;
 
+mod common;
+use common::{describe_pinning, env_list, env_or, pin_list, pin_to};
+
 const MSG: usize = 73;
 const CAPACITY: u64 = 8 << 20;
-
-fn env_or<T: std::str::FromStr>(key: &str, default: T) -> T {
-    std::env::var(key)
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(default)
-}
 
 struct Run {
     writer_rate: f64,
@@ -42,16 +38,20 @@ struct Run {
     overruns: u64,
 }
 
-fn run(readers: usize, messages: u64) -> Run {
+fn run(readers: usize, messages: u64, pins: &Option<Vec<usize>>) -> Run {
     let queue = Queue::anon(CAPACITY).unwrap();
     let stop = Arc::new(AtomicBool::new(false));
     let t0 = Instant::now();
 
     let handles: Vec<_> = (0..readers)
-        .map(|_| {
+        .map(|i| {
             let mut consumer = queue.consumer();
             let stop = Arc::clone(&stop);
+            let pin = pins.as_ref().map(|p| p[i + 1]);
             std::thread::spawn(move || {
+                if let Some(core) = pin {
+                    pin_to(core);
+                }
                 let mut buf = [0u8; 256];
                 let mut received = 0u64;
                 let mut overruns = 0u64;
@@ -62,9 +62,12 @@ fn run(readers: usize, messages: u64) -> Run {
                             assert_eq!(n, MSG);
                             let seq = u64::from_le_bytes(buf[..8].try_into().unwrap());
                             if let Some(prev) = last {
-                                assert!(
-                                    seq > prev,
-                                    "reader saw seq {seq} after {prev}: reordered or corrupt"
+                                // Consecutive, not merely increasing: between overruns
+                                // every reader must see every frame exactly once.
+                                assert_eq!(
+                                    seq,
+                                    prev + 1,
+                                    "reader saw seq {seq} after {prev}: dropped, repeated or corrupt"
                                 );
                             }
                             last = Some(seq);
@@ -85,6 +88,9 @@ fn run(readers: usize, messages: u64) -> Run {
                         Err(outcry::Error::Overrun { .. }) => {
                             overruns += 1;
                             consumer.resync();
+                            // Resyncing skips frames on purpose, so the sequence restarts
+                            // from wherever the head now is.
+                            last = None;
                             if stop.load(Ordering::Acquire) {
                                 break;
                             }
@@ -97,6 +103,9 @@ fn run(readers: usize, messages: u64) -> Run {
         })
         .collect();
 
+    if let Some(p) = pins {
+        pin_to(p[0]);
+    }
     let mut producer = queue.producer().unwrap();
     let mut frame = [0xABu8; MSG];
 
@@ -124,33 +133,37 @@ fn run(readers: usize, messages: u64) -> Run {
 }
 
 fn main() {
-    let readers: Vec<usize> = std::env::var("OUTCRY_READERS")
-        .ok()
-        .map(|s| s.split(',').filter_map(|x| x.trim().parse().ok()).collect())
-        .unwrap_or_else(|| vec![1, 2, 3, 4, 6, 8]);
-    let messages: u64 = env_or("OUTCRY_MESSAGES", 2_000_000);
-    let mode = if cfg!(feature = "fast-copy") {
-        "fast-copy"
-    } else {
-        "sound"
-    };
+    let readers = env_list("OUTCRY_READERS").unwrap_or_else(|| vec![1, 2, 3, 4, 6, 8, 12]);
+    let messages: u64 = env_or("OUTCRY_MESSAGES", 3_000_000);
     let cores = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(0);
+    let pins = pin_list(*readers.iter().max().unwrap_or(&0));
 
-    println!("outcry throughput — {MSG}-byte messages, {} MiB queue, copy mode: {mode}, {cores} logical cores", CAPACITY >> 20);
+    println!(
+        "outcry throughput — {MSG}-byte messages, {} MiB queue, {cores} logical cores, {}",
+        CAPACITY >> 20,
+        describe_pinning(&pins)
+    );
     println!(
         "{:>8} {:>16} {:>22} {:>10}",
         "readers", "writer msg/s", "slowest reader msg/s", "overruns"
     );
+    // With `OUTCRY_PIN` the core list is the budget. `available_parallelism` reports the
+    // process's affinity mask, which on a machine booted with `isolcpus` counts only the
+    // housekeeping cores — it would skip every row the isolated cores exist to run.
+    let budget = match &pins {
+        Some(p) => p.len(),
+        None => cores,
+    };
     for &r in &readers {
-        if r + 1 > cores && cores > 0 {
-            println!("{r:>8}   (skipped: needs {} cores, have {cores})", r + 1);
+        if budget > 0 && r + 1 > budget {
+            println!("{r:>8}   (skipped: needs {} cores, have {budget})", r + 1);
             continue;
         }
         // Warm up once, then measure.
-        let _ = run(r, messages / 10);
-        let m = run(r, messages);
+        let _ = run(r, messages / 10, &pins);
+        let m = run(r, messages, &pins);
         println!(
             "{r:>8} {:>16.0} {:>22.0} {:>10}",
             m.writer_rate, m.slowest_reader_rate, m.overruns

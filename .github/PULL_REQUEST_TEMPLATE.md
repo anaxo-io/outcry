@@ -17,9 +17,9 @@
 ## Behaviour changes
 
 <!--
-Does this change what existing code does? If a book invariant or a public signature
-changed, say so explicitly — the property tests in tests/property_tests.rs are the
-contract, and weakening one needs a reason.
+Does this change what existing code does? If the overrun guarantee or a public signature
+changed, say so explicitly — tests/overrun_property.rs and tests/malformed.rs are the
+contract, and weakening either needs a reason.
 -->
 
 ## Performance

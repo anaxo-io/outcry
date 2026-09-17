@@ -30,8 +30,8 @@ body:
     attributes:
       label: Scope check
       description: >
-        This crate is an in-process order book data structure. It does no I/O and speaks no
-        exchange protocol.
+        This crate is a broadcast queue over shared memory: one writer, many readers, one
+        machine. It does no networking, no persistence and no work distribution.
       options:
-        - label: This request does not require network access or exchange-specific parsing.
+        - label: This request does not require a network transport, durability, or more than one writer.
           required: true

@@ -10,7 +10,7 @@ readme = "README.md"
 license = "MIT OR Apache-2.0"
 keywords = ["shared-memory", "ipc", "spmc", "broadcast", "low-latency"]
 categories = ["concurrency", "data-structures", "os::unix-apis"]
-exclude = ["/.github", "/deny.toml", "/rust-toolchain.toml"]
+exclude = ["/.github", "/deny.toml", "/rust-toolchain.toml", "/CLAUDE.md"]
 
 [dependencies]
 bytemuck = { version = "1.16", features = ["derive"] }

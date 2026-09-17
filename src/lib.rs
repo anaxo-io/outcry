@@ -10,8 +10,8 @@
 //! It is an implementation in Rust of the `FastQueue` design David Gross presented in
 //! [*When Nanoseconds Matter: Ultrafast Trading Systems in C++*][talk] (CppCon 2024),
 //! including its three cache-line optimisations, with one deliberate difference: the
-//! reader's copy is sound by default rather than a data race caught after the fact. See
-//! [`copy`] for that trade and the README for what it costs.
+//! reader's copy is sound rather than a data race caught after the fact. See [`copy`] for
+//! why that costs nothing here.
 //!
 //! [talk]: https://www.youtube.com/watch?v=sX2nF1fW7kI
 //!

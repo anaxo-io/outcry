@@ -33,9 +33,6 @@ In scope:
 
 Out of scope:
 
-- The `fast-copy` feature is documented as trading soundness for speed. Reports that it
-  is a data race are correct and not news; reports that the overrun check fails to catch
-  a race it should catch are in scope.
 - Another process with write access to the queue file can corrupt it. Shared memory has
   the trust model of a shared file; protect it with file permissions.
 - Two producers on one file corrupt it. That is documented and enforced only within a

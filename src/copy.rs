@@ -8,17 +8,17 @@
 //! works on real hardware. It is also a data race in the abstract machine — the talk says
 //! so on its own slide — and a data race is undefined behaviour in Rust exactly as in C++.
 //!
-//! So there are two implementations:
+//! So every byte of the ring is read and written through `AtomicU64` with `Relaxed`
+//! ordering. Concurrent atomic accesses are never a data race, and the acquire/release on
+//! the counters orders them. Correct by construction, at one atomic per 8 bytes — which on
+//! x86-64 is one `mov` per 8 bytes.
 //!
-//! - **sound** (default): every byte of the ring is read and written through
-//!   `AtomicU64` with `Relaxed` ordering. Concurrent atomic accesses are never a data
-//!   race, and the acquire/release on the counters orders them. Correct by construction;
-//!   costs one atomic per 8 bytes.
-//! - **`fast-copy`** (feature): `ptr::copy_nonoverlapping`, as the original. Faster;
-//!   relies on the hardware behaving as it does rather than as the language promises.
-//!
-//! Both are benchmarked in the README. Pick the second only if you have measured that
-//! you need it.
+//! The `memcpy` version was implemented, benchmarked and removed. It was *slower* at every
+//! reader count measured — 0.65x the throughput of this one with a single reader, 0.80x
+//! with twelve — because at these payload sizes `copy_nonoverlapping` calls a generic
+//! `memcpy` that dispatches on length, while this loop inlines to a handful of plain
+//! `mov`s: a `Relaxed` load or store of a `u64` on x86-64 is exactly that. The race bought
+//! nothing, so there is no trade to offer. The README has the numbers.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -32,26 +32,19 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub(crate) unsafe fn write(dst: *mut u8, src: &[u8]) {
     // SAFETY: preconditions are the function's documented contract.
     unsafe {
-        #[cfg(feature = "fast-copy")]
-        {
-            std::ptr::copy_nonoverlapping(src.as_ptr(), dst, src.len());
+        let words = dst as *mut AtomicU64;
+        let mut chunks = src.chunks_exact(8);
+        let mut i = 0;
+        for chunk in &mut chunks {
+            let v = u64::from_ne_bytes(chunk.try_into().unwrap());
+            (*words.add(i)).store(v, Ordering::Relaxed);
+            i += 1;
         }
-        #[cfg(not(feature = "fast-copy"))]
-        {
-            let words = dst as *mut AtomicU64;
-            let mut chunks = src.chunks_exact(8);
-            let mut i = 0;
-            for chunk in &mut chunks {
-                let v = u64::from_ne_bytes(chunk.try_into().unwrap());
-                (*words.add(i)).store(v, Ordering::Relaxed);
-                i += 1;
-            }
-            let rest = chunks.remainder();
-            if !rest.is_empty() {
-                let mut last = [0u8; 8];
-                last[..rest.len()].copy_from_slice(rest);
-                (*words.add(i)).store(u64::from_ne_bytes(last), Ordering::Relaxed);
-            }
+        let rest = chunks.remainder();
+        if !rest.is_empty() {
+            let mut last = [0u8; 8];
+            last[..rest.len()].copy_from_slice(rest);
+            (*words.add(i)).store(u64::from_ne_bytes(last), Ordering::Relaxed);
         }
     }
 }
@@ -66,25 +59,18 @@ pub(crate) unsafe fn write(dst: *mut u8, src: &[u8]) {
 pub(crate) unsafe fn read(dst: &mut [u8], src: *const u8) {
     // SAFETY: preconditions are the function's documented contract.
     unsafe {
-        #[cfg(feature = "fast-copy")]
-        {
-            std::ptr::copy_nonoverlapping(src, dst.as_mut_ptr(), dst.len());
+        let words = src as *const AtomicU64;
+        let mut chunks = dst.chunks_exact_mut(8);
+        let mut i = 0;
+        for chunk in &mut chunks {
+            let v = (*words.add(i)).load(Ordering::Relaxed);
+            chunk.copy_from_slice(&v.to_ne_bytes());
+            i += 1;
         }
-        #[cfg(not(feature = "fast-copy"))]
-        {
-            let words = src as *const AtomicU64;
-            let mut chunks = dst.chunks_exact_mut(8);
-            let mut i = 0;
-            for chunk in &mut chunks {
-                let v = (*words.add(i)).load(Ordering::Relaxed);
-                chunk.copy_from_slice(&v.to_ne_bytes());
-                i += 1;
-            }
-            let rest = chunks.into_remainder();
-            if !rest.is_empty() {
-                let v = (*words.add(i)).load(Ordering::Relaxed);
-                rest.copy_from_slice(&v.to_ne_bytes()[..rest.len()]);
-            }
+        let rest = chunks.into_remainder();
+        if !rest.is_empty() {
+            let v = (*words.add(i)).load(Ordering::Relaxed);
+            rest.copy_from_slice(&v.to_ne_bytes()[..rest.len()]);
         }
     }
 }

@@ -21,13 +21,6 @@ thiserror = "2.0"
 proptest = "1.5"
 tempfile = "3"
 
-[features]
-default = []
-# Copy frames with `ptr::copy_nonoverlapping` instead of word-wise atomics. Faster, and
-# the same trade the original C++ makes: a read that races the writer is a data race in
-# the abstract machine, caught after the fact by the overrun check. See README.
-fast-copy = []
-
 [[bench]]
 name = "throughput"
 harness = false

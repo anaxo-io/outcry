@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-19
+
 ### Changed
 
 - README: depend on `outcry = "0.2"` from crates.io rather than a git tag, with crates.io
@@ -166,6 +168,7 @@ Nanoseconds Matter*, in Rust.
   to use instead.
 - Miri covers the sound copy path on anonymous memory only; it cannot map files.
 
-[Unreleased]: https://github.com/anaxo-io/outcry/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/anaxo-io/outcry/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/anaxo-io/outcry/releases/tag/v0.2.1
 [0.2.0]: https://github.com/anaxo-io/outcry/releases/tag/v0.2.0
 [0.1.0]: https://github.com/anaxo-io/outcry/releases/tag/v0.1.0

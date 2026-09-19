@@ -1,7 +1,8 @@
 //! The bytes behind a queue: a file in shared memory, or anonymous memory in one process.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use memmap2::MmapMut;
 
@@ -21,6 +22,18 @@ pub(crate) struct Mapping {
     /// through that is undefined behaviour — Miri catches it, hardware does not.
     base: *mut u8,
     capacity: u64,
+    /// Value of [`RawHeader::instance`] for the queue this maps.
+    instance: u64,
+}
+
+/// A fresh identifier for a queue: nanoseconds since the epoch. Two queues created at the
+/// same path are always separated by at least a file creation and an 8 MiB zero fill, so
+/// consecutive values cannot collide.
+fn new_instance() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or_default()
 }
 
 // SAFETY: `base` is a raw pointer, which is why these are not automatic. Every access to
@@ -35,21 +48,61 @@ impl Mapping {
         BUFFER_OFFSET + capacity as usize
     }
 
-    /// Create a fresh queue file at `path`, truncating any existing one.
+    /// Create a fresh queue file at `path`, atomically replacing any existing one.
+    ///
+    /// The new queue is built in a temporary file beside the target and `rename`d into
+    /// place. The rename is atomic, so a concurrent `open` sees either the old queue or a
+    /// complete new one; and it gives the new queue a new inode, so a reader mapped to the
+    /// previous file keeps valid pages. Truncating in place instead would leave every such
+    /// reader pointing past end of file, and the first byte it touched would raise
+    /// `SIGBUS` — a signal, not an error it could handle.
     pub(crate) fn create(path: &Path, capacity: u64) -> Result<Self> {
         if !layout::capacity_ok(capacity) {
             return Err(Error::BadCapacity(capacity));
         }
+        let tmp = Self::temp_path(path)?;
+        let built = Self::build(&tmp, capacity).and_then(|this| {
+            std::fs::rename(&tmp, path)?;
+            Ok(this)
+        });
+        if built.is_err() {
+            // Nothing is published at `path`, so leave no half-built file behind either.
+            let _ = std::fs::remove_file(&tmp);
+        }
+        built
+    }
+
+    /// A sibling of `path`, in the same directory so that `rename` stays within one
+    /// filesystem and therefore stays atomic.
+    fn temp_path(path: &Path) -> Result<PathBuf> {
+        let dir = match path.parent() {
+            Some(p) if !p.as_os_str().is_empty() => p,
+            _ => Path::new("."),
+        };
+        let name = path.file_name().ok_or_else(|| {
+            Error::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "queue path does not name a file",
+            ))
+        })?;
+        Ok(dir.join(format!(
+            ".{}.{}.{}.tmp",
+            name.to_string_lossy(),
+            std::process::id(),
+            new_instance()
+        )))
+    }
+
+    /// Build a complete queue in a file that nothing else has seen yet.
+    fn build(path: &Path, capacity: u64) -> Result<Self> {
         let file = std::fs::OpenOptions::new()
             .read(true)
             .write(true)
-            .create(true)
-            .truncate(true)
+            .create_new(true)
             .open(path)?;
         file.set_len(Self::total_len(capacity) as u64)?;
-        // SAFETY: the file is ours and sized; nothing else has mapped it yet. A concurrent
-        // truncation by another process would be a SIGBUS, which is the documented
-        // hazard of file-backed mappings and out of scope.
+        // SAFETY: the file is ours, freshly created under a name nothing else knows, and
+        // sized; nothing else has mapped it.
         let mut map = unsafe { MmapMut::map_mut(&file)? };
         map.fill(0);
         let base = map.as_mut_ptr();
@@ -57,6 +110,7 @@ impl Mapping {
             _map: map,
             base,
             capacity,
+            instance: new_instance(),
         };
         this.write_header();
         Ok(this)
@@ -73,6 +127,7 @@ impl Mapping {
             _map: map,
             base,
             capacity,
+            instance: new_instance(),
         };
         this.write_header();
         Ok(this)
@@ -122,6 +177,7 @@ impl Mapping {
             _map: map,
             base,
             capacity: header.capacity,
+            instance: header.instance,
         };
 
         // The counters are live state, not layout, and everything downstream trusts
@@ -148,7 +204,8 @@ impl Mapping {
             version: VERSION,
             frame_align: FRAME_ALIGN as u32,
             capacity: self.capacity,
-            _reserved: [0; 5],
+            instance: self.instance,
+            _reserved: [0; 4],
         };
         let bytes = bytemuck::bytes_of(&header);
         // SAFETY: `base` points at a mapping of at least `BUFFER_OFFSET` bytes, we hold
@@ -178,6 +235,9 @@ impl Mapping {
     }
     pub(crate) fn capacity(&self) -> u64 {
         self.capacity
+    }
+    pub(crate) fn instance(&self) -> u64 {
+        self.instance
     }
     pub(crate) fn mask(&self) -> u64 {
         self.capacity - 1

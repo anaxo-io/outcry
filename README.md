@@ -90,6 +90,36 @@ lines: the producer publishes `reserved` in blocks of one sixteenth of the ring 
 than per message; payloads are padded to 8 bytes; the consumer caches `published` and
 only re-reads it once it has consumed everything it last saw.
 
+## Restarting a writer
+
+A long-running deployment restarts its writer. `Queue::create` therefore **replaces** the
+file at the path rather than truncating it: the new queue is built beside the target and
+`rename`d into place, which is atomic and gives it a new inode. Readers already mapped to
+the previous queue keep valid pages and carry on; they see a queue that has stopped, not a
+`SIGBUS`.
+
+That leaves one thing a reader cannot work out on its own. A replaced queue and an idle
+one look identical from inside the mapping — both are simply silent. Compare
+[`Queue::instance`] with the one currently at the path to tell them apart:
+
+```rust
+use outcry::Queue;
+
+fn writer_was_replaced(mine: &Queue, path: &str) -> Result<bool, outcry::Error> {
+    Ok(Queue::open(path)?.instance() != mine.instance())
+}
+```
+
+How often to check is yours to decide — after a quiet interval, on a timer, or never if
+the queue is only ever created once. The crate does not poll on your behalf.
+
+Two consequences worth stating plainly. The replacement queue starts empty, so a reader
+that reattaches has missed whatever was published between the restart and its reattaching.
+And the old file stays alive, unnamed, for as long as any reader maps it; when the last
+one drops its mapping the kernel reclaims the space.
+
+[`Queue::instance`]: https://docs.rs/outcry/latest/outcry/struct.Queue.html#method.instance
+
 ## Where this differs from the original
 
 **The copy is sound.** In the C++ original the consumer `memcpy`s a frame the

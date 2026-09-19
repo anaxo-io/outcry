@@ -23,7 +23,12 @@ const _: () = assert!(usize::BITS >= 64);
 /// Bytes at the front of the mapping identifying it as ours.
 pub const MAGIC: u64 = u64::from_le_bytes(*b"OUTCRY\x00\x01");
 /// Layout version. Bump when the on-page format changes.
-pub const VERSION: u32 = 1;
+///
+/// 2 added [`RawHeader::instance`]. A version-1 writer truncates the queue file in place
+/// when it restarts, which raises `SIGBUS` in every reader mapped to it, so refusing to
+/// interoperate with one is a feature: the mismatch surfaces as an error on `open`
+/// instead of as a dead reader later.
+pub const VERSION: u32 = 2;
 
 /// Size of a cache line on every platform this targets.
 pub const CACHE_LINE: usize = 64;
@@ -74,8 +79,16 @@ pub struct RawHeader {
     pub frame_align: u32,
     /// Buffer size in bytes; a power of two.
     pub capacity: u64,
+    /// Identifies this queue among the ones that have lived at the same path.
+    ///
+    /// Nanoseconds since the epoch at the moment of creation. A reader compares it with
+    /// the one it attached to in order to tell "the writer is quiet" from "the writer
+    /// was replaced underneath me"; the two are otherwise indistinguishable, because a
+    /// replaced queue leaves the reader mapped to a file that will never change again.
+    /// A collision would cost a missed detection, never soundness.
+    pub instance: u64,
     /// Reserved for future use; zero.
-    pub _reserved: [u64; 5],
+    pub _reserved: [u64; 4],
 }
 
 const _: () = assert!(std::mem::size_of::<RawHeader>() == CACHE_LINE);

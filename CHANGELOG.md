@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `Queue::create` truncated an existing file in place and re-extended it, reusing the
+  inode. Every process already mapped to that queue was briefly pointing past end of file,
+  and the first byte it touched raised `SIGBUS` — which kills a process outright, with no
+  unwinding, no error and nothing in its log. Restarting a writer was therefore fatal to
+  every reader, which is the normal operational case for a long-running deployment. The
+  new queue is now built in a temporary file beside the target and `rename`d into place:
+  atomic, so a concurrent `open` sees either the old queue or a complete new one, and a
+  new inode, so existing readers keep valid pages and observe a queue that has stopped
+  rather than dying. A create that fails removes its temporary file. (#1)
 - `Queue::open` validated the static header and trusted the live counters. A file whose
   `published` was not frame-aligned put a producer or consumer on an odd address, where
   the frame word becomes an unaligned `AtomicU64`: undefined behaviour reached through
@@ -27,6 +36,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The crate no longer builds where `usize` is narrower than 64 bits, which would truncate
   positions and lengths on the way into the pointer arithmetic.
 
+### Changed
+
+- **The on-page layout version is now 2**, because `RawHeader` gained an `instance` field
+  in space that was reserved. Existing queue files no longer open, which for a queue that
+  does not outlive a reboot costs little and buys something: a version-1 writer still
+  truncates in place, so refusing to interoperate turns a future `SIGBUS` into a
+  `BadHeader` at attach time.
+
 ### Removed
 
 - The `fast-copy` feature. It replaced the word-wise atomic copy with
@@ -41,6 +58,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `Queue::instance`, the identifier assigned when a queue is created. Because a replaced
+  queue leaves its readers mapped to an intact file that will never change again, a
+  replaced writer and a merely idle one are indistinguishable from inside the mapping;
+  comparing this value with the one currently at the path separates them. It is
+  nanoseconds since the epoch, so it doubles as a creation timestamp.
 - `benches/latency.rs`: writer-to-reader hand-off latency with a paced writer, reported as
   p50 through p99.99 and max. Throughput measures how fast readers drain; this measures
   what the queue costs per frame.

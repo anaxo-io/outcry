@@ -105,6 +105,32 @@ impl Queue {
         self.map.capacity()
     }
 
+    /// Identifier assigned when this queue was created.
+    ///
+    /// [`Queue::create`] replaces the file at a path atomically rather than truncating
+    /// it, so a reader that was attached across a writer restart keeps a valid mapping of
+    /// the *previous* queue — one that is intact and will never change again. From inside
+    /// that mapping, a replaced writer and a merely quiet one look identical. Comparing
+    /// this value with the one currently at the path tells them apart:
+    ///
+    /// ```no_run
+    /// # use outcry::Queue;
+    /// # fn check(mine: &Queue, path: &str) -> Result<(), outcry::Error> {
+    /// if Queue::open(path)?.instance() != mine.instance() {
+    ///     // The writer restarted. Re-open and make a new consumer; anything the
+    ///     // replacement queue published before now is already gone.
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// Nanoseconds since the epoch at the moment of creation, so it is also readable as a
+    /// timestamp. [`Queue::anon`] assigns one too, though nothing can observe it from
+    /// another handle.
+    pub fn instance(&self) -> u64 {
+        self.map.instance()
+    }
+
     /// The producer. At most one per handle; a second call returns an error.
     ///
     /// This guards against two writers in one process. It cannot see another process:

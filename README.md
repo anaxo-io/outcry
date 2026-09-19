@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/anaxo-io/outcry/actions/workflows/ci.yml/badge.svg)](https://github.com/anaxo-io/outcry/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+[![crates.io](https://img.shields.io/crates/v/outcry.svg)](https://crates.io/crates/outcry)
+[![docs.rs](https://img.shields.io/docsrs/outcry)](https://docs.rs/outcry)
 [![MSRV](https://img.shields.io/badge/MSRV-1.89-blue.svg)](https://blog.rust-lang.org/)
 
 One writer, many readers, shared memory, nobody waits.
@@ -24,7 +26,7 @@ messages per second. It differs from the original in one deliberate way, describ
 
 ```toml
 [dependencies]
-outcry = { git = "https://github.com/anaxo-io/outcry", tag = "v0.2.0" }
+outcry = "0.2"
 ```
 
 One process writes:
@@ -282,12 +284,14 @@ verified against a checksum in its payload. It runs in both copy modes.
 
 ## Releases
 
-Tagged `vX.Y.Z` releases with notes taken from [`CHANGELOG.md`](CHANGELOG.md); see the
-[releases page](https://github.com/anaxo-io/outcry/releases). Not published to crates.io,
-so depend on a tag:
+Published to [crates.io](https://crates.io/crates/outcry), documented on
+[docs.rs](https://docs.rs/outcry), and tagged `vX.Y.Z` on GitHub with notes taken from
+[`CHANGELOG.md`](CHANGELOG.md); see the
+[releases page](https://github.com/anaxo-io/outcry/releases). Version `X.Y.Z` on
+crates.io is byte-identical to tag `vX.Y.Z`.
 
 ```toml
-outcry = { git = "https://github.com/anaxo-io/outcry", tag = "v0.2.0" }
+outcry = "0.2"
 ```
 
 The release procedure, and the branch rules that go with it, are in

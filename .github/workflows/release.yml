@@ -1,0 +1,53 @@
+name: Release
+
+# Pushing a `vX.Y.Z` tag publishes the GitHub release for it, with the matching
+# CHANGELOG.md section as its notes. `taiki-e/create-gh-release-action` fails if that
+# section is missing, so the release and the changelog cannot disagree.
+#
+# There is no binary matrix here as there is in other repositories: this crate is a
+# library and has no `[[bin]]`. The equivalent artefact check is `cargo package`, which
+# builds the crate from exactly the files that would ship.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  verify:
+    name: verify the tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # The release action reads the changelog but not Cargo.toml, and a tag that
+      # disagrees with the version is a mistake worth catching before anything is public.
+      - name: Tag matches the crate version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          crate=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+          if [ "$tag" != "$crate" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $crate"
+            exit 1
+          fi
+
+      - run: cargo test
+      - run: cargo package
+
+  create-release:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: taiki-e/create-gh-release-action@v1
+        with:
+          changelog: CHANGELOG.md
+          token: ${{ secrets.GITHUB_TOKEN }}

@@ -69,6 +69,42 @@ CI runs all of these plus an MSRV check against Rust 1.89 and `cargo deny check`
   the medians in the pull request with the machine and the core list named. An unpinned
   single run on a multi-L3 CPU is a coin flip and will be asked to be redone.
 
+## Releasing
+
+Releases are cut from `main` by pushing a tag. The tag is the trigger; everything else is
+one ordinary commit beforehand.
+
+1. **Decide the version.** Pre-1.0, a breaking change bumps the minor: a removed feature,
+   a changed public signature, a bumped MSRV, or a bumped `layout::VERSION`, since the
+   last stops existing queue files opening.
+2. **Write the release commit.** It touches exactly two files:
+   - `Cargo.toml`: the `version` field.
+   - `CHANGELOG.md`: rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`, add a fresh
+     empty `## [Unreleased]` above it, and update the link definitions at the bottom so
+     `[Unreleased]` compares against the new tag and `[X.Y.Z]` points at its release.
+
+   Subject: `chore: release vX.Y.Z`.
+3. **Tag and push.**
+
+   ```bash
+   git tag -a v0.2.0 -m v0.2.0
+   git push origin main v0.2.0
+   ```
+
+`.github/workflows/release.yml` does the rest. It refuses the tag if it does not match the
+version in `Cargo.toml`, runs the tests and `cargo package` — the latter builds the crate
+from exactly the files that would ship — and then hands over to
+[`taiki-e/create-gh-release-action`], which takes the release notes from the matching
+`CHANGELOG.md` section and fails if there is no such section. A pre-release tag such as
+`v0.2.0-rc1` is published as a pre-release. There is no binary matrix, unlike repositories
+that ship executables: this crate is a library and has no `[[bin]]`.
+
+[`taiki-e/create-gh-release-action`]: https://github.com/taiki-e/create-gh-release-action
+
+Nothing is pushed to crates.io. If that changes, it becomes a step in this workflow behind
+a `CARGO_REGISTRY_TOKEN` secret, and it is worth remembering that a published version can
+be yanked but never replaced.
+
 ## Commit messages
 
 [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `docs:`,

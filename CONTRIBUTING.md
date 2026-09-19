@@ -69,16 +69,45 @@ CI runs all of these plus an MSRV check against Rust 1.89 and `cargo deny check`
   the medians in the pull request with the machine and the core list named. An unpinned
   single run on a multi-L3 CPU is a coin flip and will be asked to be redone.
 
+## Working on `main`
+
+`main` is protected. Changes arrive by pull request:
+
+- **A pull request is required.** No approvals are needed — there is one maintainer, and
+  GitHub does not let anyone approve their own pull request, so requiring one would lock
+  the repository. Review still happens; it just is not enforced by a counter.
+- **All six checks must pass**: `fmt + clippy`, `test`, `miri (sound copy)`, `rustdoc`,
+  `msrv (1.89)`, `cargo-deny`. The branch must also be up to date with `main` first.
+- **History stays linear.** Merge commits are disabled, so merge by **rebase** when the
+  commits are each worth keeping, and by **squash** when they are `wip`-and-fixup noise.
+  Prefer rebase: every commit on `main` should build and pass on its own, because
+  bisecting a soundness regression is a real thing that happens here.
+- Conversations must be resolved before merging, and merged branches delete themselves.
+- Force pushes and branch deletion are blocked.
+
+Administrators can push to `main` directly. That exists so `cargo release` can push a
+release commit without opening a pull request for it; it is not an invitation to skip the
+checks.
+
+If a job is ever renamed, the protection rule must be updated in the same breath — a
+required check that no longer reports blocks every pull request forever, waiting for
+something that cannot arrive.
+
 ## Releasing
 
 Releases are cut from `main` by pushing a tag. The tag is the trigger; everything else is
 one ordinary commit beforehand.
 
-1. **Decide the version.** This is the judgement call and it is not automated. Pre-1.0, a
+### The steps
+
+1. **Write the changelog as you go.** `cargo release` moves the `## [Unreleased]` heading
+   but never writes what goes under it. Releasing with that section empty produces a dated
+   heading with nothing beneath it and a GitHub release with no notes.
+2. **Decide the version.** This is the judgement call and it is not automated. Pre-1.0, a
    breaking change bumps the minor — and breaking includes things no tool infers from a
    commit subject: a bumped MSRV, or a bumped `layout::VERSION`, which stops every
    existing queue file opening.
-2. **Run `cargo release`.** It bumps `Cargo.toml`, dates the `## [Unreleased]` section and
+3. **Run `cargo release`.** It bumps `Cargo.toml`, dates the `## [Unreleased]` section and
    opens a fresh one, moves the changelog links, runs the tests, commits as
    `chore: release vX.Y.Z`, tags, and pushes.
 
@@ -87,28 +116,58 @@ one ordinary commit beforehand.
    cargo release 0.3.0 --execute  # do it
    ```
 
-   `release.toml` holds the configuration. It sets `publish = false`: nothing goes to
-   crates.io.
+   Pull `main` first. Rebase and squash merges both rewrite commits, so a local `main`
+   that merged a pull request through the web interface has diverged, and `cargo release`
+   refuses to run from there.
 
-Doing it by hand is the same two files — `Cargo.toml`'s `version`, and `CHANGELOG.md`'s
-heading plus the two link definitions at the bottom — followed by
-`git tag -a vX.Y.Z -m vX.Y.Z` and `git push origin main vX.Y.Z`. Push the branch before
-or with the tag: the workflow checks out the tag independently, but a tag that lands
-first publishes notes whose `[Unreleased]` compare link 404s until the branch catches up.
+`release.toml` holds the configuration, including `publish = false`.
 
-`.github/workflows/release.yml` does the rest. It refuses the tag if it does not match the
-version in `Cargo.toml`, runs the tests and `cargo package` — the latter builds the crate
-from exactly the files that would ship — and then hands over to
-[`taiki-e/create-gh-release-action`], which takes the release notes from the matching
-`CHANGELOG.md` section and fails if there is no such section. A pre-release tag such as
-`v0.2.0-rc1` is published as a pre-release. There is no binary matrix, unlike repositories
-that ship executables: this crate is a library and has no `[[bin]]`.
+### What happens next
+
+Pushing the tag triggers `.github/workflows/release.yml`, which:
+
+1. refuses the tag if it does not match the version in `Cargo.toml` — the release action
+   reads `CHANGELOG.md` but never looks at `Cargo.toml`, so nothing else would catch it;
+2. runs `cargo package`, which builds the crate from exactly the files that would ship;
+3. hands over to [`taiki-e/create-gh-release-action`], which takes the notes from the
+   matching `CHANGELOG.md` section and fails if there is no such section, so the release
+   and the changelog cannot disagree.
+
+It deliberately does **not** re-run the test suite. Releases come from `main`, every commit
+there has passed the full matrix, and this workflow runs once per release — its build cache
+is always cold, so repeating the suite costs ten minutes to learn what CI reported minutes
+earlier. There is no binary matrix either, unlike repositories that ship executables: this
+crate is a library and has no `[[bin]]`.
+
+A pre-release tag such as `v0.2.0-rc1` is published as a pre-release automatically.
 
 [`taiki-e/create-gh-release-action`]: https://github.com/taiki-e/create-gh-release-action
 
-Nothing is pushed to crates.io. If that changes, it becomes a step in this workflow behind
-a `CARGO_REGISTRY_TOKEN` secret, and it is worth remembering that a published version can
-be yanked but never replaced.
+### Doing it by hand
+
+The same two files — `Cargo.toml`'s `version`, and `CHANGELOG.md`'s heading plus the two
+link definitions at the bottom — committed as `chore: release vX.Y.Z`, then:
+
+```bash
+git tag -a vX.Y.Z -m vX.Y.Z
+git push origin main vX.Y.Z
+```
+
+Push the branch before or with the tag. The workflow checks out the tag independently, but
+a tag that lands first publishes notes whose `[Unreleased]` compare link 404s until the
+branch catches up.
+
+### Two things that will surprise you
+
+**A tag event uses the workflow file from the tagged commit**, not from `main`. Fixing
+`release.yml` does nothing for tags that already exist, and a tag created before a fix
+lands will keep running the old version. `v0.1.0` and `v0.2.0` were both released by hand
+with `gh release create` for this reason.
+
+**Nothing is published to crates.io.** If that changes it becomes a step in this workflow
+behind a `CARGO_REGISTRY_TOKEN` secret, and it is worth remembering that a published
+version can be yanked but never replaced or reused — which is why it is not a command
+anyone can run locally.
 
 ## Commit messages
 

@@ -24,7 +24,7 @@ messages per second. It differs from the original in one deliberate way, describ
 
 ```toml
 [dependencies]
-outcry = { git = "https://github.com/anaxo-io/outcry", tag = "v0.1.0" }
+outcry = { git = "https://github.com/anaxo-io/outcry", tag = "v0.2.0" }
 ```
 
 One process writes:
@@ -279,6 +279,19 @@ joiners, many readers, `BufferTooSmall`, and overrun-then-resync. The test that 
 `tests/overrun_property.rs`: a reader repeatedly stalls until the writer has lapped it,
 resumes while the writer is still rewriting that region, and every frame it accepts is
 verified against a checksum in its payload. It runs in both copy modes.
+
+## Releases
+
+Tagged `vX.Y.Z` releases with notes taken from [`CHANGELOG.md`](CHANGELOG.md); see the
+[releases page](https://github.com/anaxo-io/outcry/releases). Not published to crates.io,
+so depend on a tag:
+
+```toml
+outcry = { git = "https://github.com/anaxo-io/outcry", tag = "v0.2.0" }
+```
+
+The release procedure, and the branch rules that go with it, are in
+[`CONTRIBUTING.md`](CONTRIBUTING.md#releasing).
 
 ## Contributing
 

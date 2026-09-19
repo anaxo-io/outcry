@@ -110,7 +110,10 @@ What is specific to this crate:
   the version is not chosen by a tool.
 - `.github/workflows/release.yml` calls the shared `release-rust.yml`, which verifies the
   tag against `Cargo.toml`, runs `cargo package`, and creates the GitHub release from the
-  matching `CHANGELOG.md` section. Nothing goes to crates.io.
+  matching `CHANGELOG.md` section, then publishes to crates.io through Trusted
+  Publishing — the repository and `release.yml` are registered on the crate's settings
+  page, and no token is stored anywhere. `0.2.0` was published by hand from its tag,
+  because the crate had to exist before it could be trusted.
 - `v0.1.0` and `v0.2.0` were released by hand with `gh release create`, because a tag
   event uses the workflow from the tagged commit and neither tag predates a working one.
 

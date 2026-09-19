@@ -39,7 +39,12 @@ jobs:
             exit 1
           fi
 
-      - run: cargo test
+      # Deliberately not re-running the test suite. Releases are cut from main, every
+      # commit on main has been through the full CI matrix — fmt, clippy, tests, Miri,
+      # MSRV, deny — and this workflow runs once per release, so its build cache is always
+      # cold: repeating the suite costs ten minutes to learn what CI reported minutes
+      # earlier. `cargo package` is the check CI does not do, because it builds the crate
+      # from exactly the files that would ship.
       - run: cargo package
 
   create-release:

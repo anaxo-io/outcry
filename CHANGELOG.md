@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Two producers could hold one queue. `producer_taken` was a flag on the `Queue` handle,
+  so two `Queue::open` calls — in one process or in several — each handed out a writer for
+  the same ring. The corruption that follows is silent: both advance `published`, their
+  frames interleave, and a reader returns bytes that satisfy every check it makes and were
+  never written as one frame. The claim is now an exclusive advisory lock on the queue
+  file, which other processes can see and which the kernel releases when the holder dies,
+  so a crashed writer leaves nothing to clean up. The lock belongs to the queue rather
+  than the path: a writer restarting through `Queue::create` builds a new queue and takes
+  its claim without contending with a writer still feeding the old one. (#2)
+- Dropping a `Producer` never cleared `producer_taken`, so a handle could produce exactly
+  once for its whole life even after the producer was gone. `Producer` now has a `Drop`
+  that releases the lock and the flag, and a refused claim no longer consumes the flag
+  either.
 - `Queue::create` truncated an existing file in place and re-extended it, reusing the
   inode. Every process already mapped to that queue was briefly pointing past end of file,
   and the first byte it touched raised `SIGBUS` — which kills a process outright, with no
@@ -38,6 +51,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **MSRV is now 1.89**, up from 1.85, for `File::try_lock` — stabilised in 1.89.0 and used
+  for the producer claim above. The alternative was `libc::flock`, which would have kept
+  the MSRV at the cost of a new direct dependency and another `unsafe` block in a crate
+  whose discipline is that `unsafe` appears in two files for reasons that are written
+  down. The CI MSRV job builds against 1.89 to keep the claim honest.
 - **The on-page layout version is now 2**, because `RawHeader` gained an `instance` field
   in space that was reserved. Existing queue files no longer open, which for a queue that
   does not outlive a reboot costs little and buys something: a version-1 writer still

@@ -33,14 +33,14 @@ pub(crate) unsafe fn write(dst: *mut u8, src: &[u8]) {
     // SAFETY: preconditions are the function's documented contract.
     unsafe {
         let words = dst as *mut AtomicU64;
-        let mut chunks = src.chunks_exact(8);
+        // `as_chunks` rather than `chunks_exact`: the chunk length is known to the type
+        // system, so the conversion below cannot fail and carries no panicking path.
+        let (chunks, rest) = src.as_chunks::<8>();
         let mut i = 0;
-        for chunk in &mut chunks {
-            let v = u64::from_ne_bytes(chunk.try_into().unwrap());
-            (*words.add(i)).store(v, Ordering::Relaxed);
+        for chunk in chunks {
+            (*words.add(i)).store(u64::from_ne_bytes(*chunk), Ordering::Relaxed);
             i += 1;
         }
-        let rest = chunks.remainder();
         if !rest.is_empty() {
             let mut last = [0u8; 8];
             last[..rest.len()].copy_from_slice(rest);
@@ -60,14 +60,12 @@ pub(crate) unsafe fn read(dst: &mut [u8], src: *const u8) {
     // SAFETY: preconditions are the function's documented contract.
     unsafe {
         let words = src as *const AtomicU64;
-        let mut chunks = dst.chunks_exact_mut(8);
+        let (chunks, rest) = dst.as_chunks_mut::<8>();
         let mut i = 0;
-        for chunk in &mut chunks {
-            let v = (*words.add(i)).load(Ordering::Relaxed);
-            chunk.copy_from_slice(&v.to_ne_bytes());
+        for chunk in chunks {
+            *chunk = (*words.add(i)).load(Ordering::Relaxed).to_ne_bytes();
             i += 1;
         }
-        let rest = chunks.into_remainder();
         if !rest.is_empty() {
             let v = (*words.add(i)).load(Ordering::Relaxed);
             rest.copy_from_slice(&v.to_ne_bytes()[..rest.len()]);

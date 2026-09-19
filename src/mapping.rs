@@ -1,5 +1,6 @@
 //! The bytes behind a queue: a file in shared memory, or anonymous memory in one process.
 
+use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -24,6 +25,9 @@ pub(crate) struct Mapping {
     capacity: u64,
     /// Value of [`RawHeader::instance`] for the queue this maps.
     instance: u64,
+    /// The open file this maps, kept alive for the lock in [`Mapping::claim_producer`].
+    /// `None` for anonymous memory, which no other process can reach.
+    file: Option<File>,
 }
 
 /// A fresh identifier for a queue: nanoseconds since the epoch. Two queues created at the
@@ -111,6 +115,7 @@ impl Mapping {
             base,
             capacity,
             instance: new_instance(),
+            file: Some(file),
         };
         this.write_header();
         Ok(this)
@@ -128,6 +133,7 @@ impl Mapping {
             base,
             capacity,
             instance: new_instance(),
+            file: None,
         };
         this.write_header();
         Ok(this)
@@ -178,6 +184,7 @@ impl Mapping {
             base,
             capacity: header.capacity,
             instance: header.instance,
+            file: Some(file),
         };
 
         // The counters are live state, not layout, and everything downstream trusts
@@ -187,7 +194,9 @@ impl Mapping {
         // the producer could not have left behind.
         let published = this.published().load(Ordering::Acquire);
         let reserved = this.reserved().load(Ordering::Acquire);
-        if published % FRAME_ALIGN as u64 != 0 || reserved % FRAME_ALIGN as u64 != 0 {
+        if !published.is_multiple_of(FRAME_ALIGN as u64)
+            || !reserved.is_multiple_of(FRAME_ALIGN as u64)
+        {
             return Err(Error::BadHeader("position is not frame-aligned"));
         }
         if reserved < published || reserved - published > header.capacity {
@@ -238,6 +247,34 @@ impl Mapping {
     }
     pub(crate) fn instance(&self) -> u64 {
         self.instance
+    }
+
+    /// Take the exclusive producer claim on this queue, if it is free.
+    ///
+    /// An advisory lock on the queue file, which is what makes the claim visible to other
+    /// processes: two `Queue::open` calls on one file, in one process or in several, see
+    /// each other here. The kernel releases the lock when the holding process dies, so a
+    /// writer that crashed leaves nothing to clean up — the next one simply succeeds.
+    ///
+    /// The lock belongs to the file, not the path. After [`Mapping::create`] replaces a
+    /// queue the new file is a different inode with its own lock, so a restarting writer
+    /// that creates a fresh queue never contends with the old one. That is correct: they
+    /// are two queues, and nothing interleaves.
+    ///
+    /// An anonymous mapping has no file and returns `true`; nothing outside this process
+    /// can reach it, so the handle's own flag is guard enough.
+    pub(crate) fn claim_producer(&self) -> bool {
+        match &self.file {
+            Some(file) => file.try_lock().is_ok(),
+            None => true,
+        }
+    }
+
+    /// Give the claim back, so a later producer on the same handle can take it.
+    pub(crate) fn release_producer(&self) {
+        if let Some(file) = &self.file {
+            let _ = file.unlock();
+        }
     }
     pub(crate) fn mask(&self) -> u64 {
         self.capacity - 1

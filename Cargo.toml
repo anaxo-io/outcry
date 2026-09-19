@@ -2,7 +2,7 @@
 name = "outcry"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.89"
 description = "Single-writer, many-reader broadcast queue over shared memory: variable-length frames, readers never block the writer, a lagging reader is overrun and told so"
 repository = "https://github.com/anaxo-io/outcry"
 documentation = "https://docs.rs/outcry"

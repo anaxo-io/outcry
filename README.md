@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/anaxo-io/outcry/actions/workflows/ci.yml/badge.svg)](https://github.com/anaxo-io/outcry/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
-[![MSRV](https://img.shields.io/badge/MSRV-1.85-blue.svg)](https://blog.rust-lang.org/)
+[![MSRV](https://img.shields.io/badge/MSRV-1.89-blue.svg)](https://blog.rust-lang.org/)
 
 One writer, many readers, shared memory, nobody waits.
 
@@ -257,8 +257,10 @@ because every frame in it was delivered.
 
 ## When not to use this
 
-- **More than one writer.** Not supported, and only enforced within a process. Two
-  processes calling `producer()` on the same file corrupt it.
+- **More than one writer.** Not supported. `producer()` now refuses rather than corrupts:
+  the claim is an advisory lock on the queue file, so it holds across handles and across
+  processes, and the kernel releases it if the holder dies. If you need many writers, this
+  is the wrong shape of queue.
 - **Work distribution.** Every reader gets every frame. For "each message to one worker",
   use an MPMC queue: [`crossbeam`](https://crates.io/crates/crossbeam) in-process,
   [`shaq`](https://crates.io/crates/shaq) across processes.

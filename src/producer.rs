@@ -1,6 +1,6 @@
 //! The single writer.
 
-use std::sync::atomic::{fence, Ordering};
+use std::sync::atomic::{fence, AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crate::copy;
@@ -8,13 +8,15 @@ use crate::error::{Error, Result};
 use crate::layout::{align_up, frame_size, max_payload, reserve_block, FRAME_HEADER, PAD};
 use crate::mapping::Mapping;
 
-/// Writes frames to a queue. There must be exactly one per queue.
+/// Writes frames to a queue. There is exactly one per queue.
 ///
-/// The queue cannot enforce that across processes; two producers on one queue corrupt
-/// it. Within a process, [`Queue::producer`](crate::Queue::producer) hands out at most
-/// one.
+/// [`Queue::producer`](crate::Queue::producer) enforces that with an advisory lock on the
+/// queue file, so the claim holds across handles and across processes. Dropping this
+/// releases it.
 pub struct Producer {
     map: Arc<Mapping>,
+    /// The handle's flag, cleared on drop so the same handle can produce again.
+    taken: Arc<AtomicBool>,
     /// Bytes published so far. Only this struct advances it.
     local: u64,
     /// Where `reserved` in shared memory currently points; stored ahead in blocks.
@@ -25,11 +27,12 @@ pub struct Producer {
 }
 
 impl Producer {
-    pub(crate) fn new(map: Arc<Mapping>) -> Self {
+    pub(crate) fn new(map: Arc<Mapping>, taken: Arc<AtomicBool>) -> Self {
         let local = map.published().load(Ordering::Acquire);
         let cached_reserved = map.reserved().load(Ordering::Acquire);
         Self {
             map,
+            taken,
             local,
             cached_reserved,
             scratch: Vec::new(),
@@ -130,5 +133,14 @@ impl Producer {
         self.local = end;
         self.map.published().store(end, Ordering::Release);
         Ok(())
+    }
+}
+
+impl Drop for Producer {
+    fn drop(&mut self) {
+        // Release the file lock first, then the handle's flag: a producer taken on this
+        // handle immediately afterwards must find the queue free, not race the unlock.
+        self.map.release_producer();
+        self.taken.store(false, Ordering::Release);
     }
 }

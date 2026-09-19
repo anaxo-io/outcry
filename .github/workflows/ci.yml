@@ -66,12 +66,12 @@ jobs:
       - run: cargo doc --no-deps --all-features
 
   msrv:
-    name: msrv (1.85)
+    name: msrv (1.89)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.85
+      - uses: dtolnay/rust-toolchain@1.89
       - uses: Swatinem/rust-cache@v2
       - run: rm -f rust-toolchain.toml
       - run: cargo check --all-features

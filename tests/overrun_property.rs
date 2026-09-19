@@ -93,7 +93,7 @@ proptest! {
                     // left, so the lap cannot fail to happen whatever the scheduler does —
                     // and then every `stall_every` frames. The next read after a stall is
                     // guaranteed to land in a region the writer has rewritten.
-                    if accepted == 1 || (accepted % stall_every == 0 && !done.load(Ordering::Acquire)) {
+                    if accepted == 1 || (accepted.is_multiple_of(stall_every) && !done.load(Ordering::Acquire)) {
                         let target = c.position() + 2 * CAP;
                         while writer_pos.load(Ordering::Acquire) < target && !done.load(Ordering::Acquire) {
                             std::hint::spin_loop();

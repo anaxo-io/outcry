@@ -131,10 +131,28 @@ impl Queue {
         self.map.instance()
     }
 
-    /// The producer. At most one per handle; a second call returns an error.
+    /// The producer. At most one per queue.
     ///
-    /// This guards against two writers in one process. It cannot see another process:
-    /// only one process may ever call this for a given file, by convention.
+    /// Two writers on one queue corrupt it, and the corruption is silent: both advance
+    /// `published`, their frames interleave, and a reader returns bytes that satisfy every
+    /// check it makes and were never written as one frame. So the claim is enforced twice.
+    ///
+    /// Within this handle and its clones, by a flag. Across handles and across processes,
+    /// by an exclusive advisory lock on the queue file — two [`Queue::open`] calls on one
+    /// file see each other, whether or not they are in the same process. The kernel
+    /// releases that lock when the holding process dies, so a writer that crashed leaves
+    /// nothing to clean up.
+    ///
+    /// Dropping the returned [`Producer`] releases both, and a later call succeeds.
+    ///
+    /// The lock belongs to the queue rather than to the path. A writer that restarts by
+    /// calling [`Queue::create`] builds a *new* queue and takes that one's claim, without
+    /// contending with a writer still feeding the old one; the two are separate queues and
+    /// nothing interleaves. A writer that restarts by calling [`Queue::open`] resumes the
+    /// same queue, and there the lock is what guarantees its predecessor is gone.
+    ///
+    /// [`Queue::anon`] has no file, so only the flag applies — which is sufficient, since
+    /// nothing outside this process can reach an anonymous mapping.
     pub fn producer(&self) -> Result<Producer> {
         if self.producer_taken.swap(true, Ordering::AcqRel) {
             return Err(Error::Io(std::io::Error::new(
@@ -142,7 +160,19 @@ impl Queue {
                 "this queue already has a producer",
             )));
         }
-        Ok(Producer::new(Arc::clone(&self.map)))
+        if !self.map.claim_producer() {
+            // Someone else holds the queue. Give the flag back, or this handle could never
+            // produce again even once they are gone.
+            self.producer_taken.store(false, Ordering::Release);
+            return Err(Error::Io(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "another handle or process is already the producer for this queue",
+            )));
+        }
+        Ok(Producer::new(
+            Arc::clone(&self.map),
+            Arc::clone(&self.producer_taken),
+        ))
     }
 
     /// A new consumer, starting at the current head of the stream.

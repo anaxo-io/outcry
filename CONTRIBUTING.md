@@ -23,7 +23,7 @@ cargo doc --no-deps --all-features
 cargo +nightly miri test --test behaviour -- --skip file_backed --skip open_rejects
 ```
 
-CI runs all of these plus an MSRV check against Rust 1.85 and `cargo deny check`.
+CI runs all of these plus an MSRV check against Rust 1.89 and `cargo deny check`.
 
 ## What this crate is careful about
 

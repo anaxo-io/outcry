@@ -8,6 +8,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use outcry::{Error, Queue};
 use proptest::prelude::*;
@@ -38,6 +39,18 @@ proptest! {
         // would leave nothing to test.
         let reader_started = Arc::new(AtomicBool::new(false));
 
+        // Created before the writer exists, so the consumer starts at position zero. A
+        // consumer begins at the *current head*: made after the writer had published
+        // frame 0, it would start past that frame, never accept one, and never set
+        // `reader_started` — while the writer spun waiting for exactly that. Both threads
+        // then spin forever. Being a race, it passed locally and on most CI runs, and hung
+        // a release build on a loaded two-core runner.
+        let mut c = q.consumer();
+
+        // No spin in this test may run unbounded: a deadlock here costs a whole CI job,
+        // and one already did.
+        let deadline = Instant::now() + Duration::from_secs(30);
+
         let writer = {
             let q = q.clone();
             let done = Arc::clone(&done);
@@ -56,7 +69,12 @@ proptest! {
                     p.write(&frame).unwrap();
                     writer_pos.store(p.position(), Ordering::Release);
                     if seq == 0 {
+                        let wait_until = Instant::now() + Duration::from_secs(30);
                         while !reader_started.load(Ordering::Acquire) {
+                            assert!(
+                                Instant::now() < wait_until,
+                                "writer waited 30s for the reader's first frame"
+                            );
                             std::hint::spin_loop();
                         }
                     }
@@ -65,7 +83,6 @@ proptest! {
             })
         };
 
-        let mut c = q.consumer();
         let mut buf = vec![0u8; 256];
         let mut accepted = 0u64;
         let mut overruns = 0u64;
@@ -73,6 +90,12 @@ proptest! {
         let mut lapped_on_purpose = 0u64;
 
         loop {
+            prop_assert!(
+                Instant::now() < deadline,
+                "reader made no progress for 30s: accepted {}, overruns {}",
+                accepted,
+                overruns
+            );
             match c.try_read(&mut buf) {
                 Ok(Some(n)) => {
                     prop_assert_eq!(n, 16 + body_len, "frame length changed");
@@ -95,7 +118,13 @@ proptest! {
                     // guaranteed to land in a region the writer has rewritten.
                     if accepted == 1 || (accepted.is_multiple_of(stall_every) && !done.load(Ordering::Acquire)) {
                         let target = c.position() + 2 * CAP;
-                        while writer_pos.load(Ordering::Acquire) < target && !done.load(Ordering::Acquire) {
+                        while writer_pos.load(Ordering::Acquire) < target
+                            && !done.load(Ordering::Acquire)
+                        {
+                            prop_assert!(
+                                Instant::now() < deadline,
+                                "stalled 30s waiting for the writer to lap us"
+                            );
                             std::hint::spin_loop();
                         }
                         if writer_pos.load(Ordering::Acquire) >= target {

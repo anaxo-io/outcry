@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The writer-restart contract is now stated where a reader lands: on `Queue::create`
+  (replacing, not truncating, and what that leaves attached readers with), on `Consumer`
+  and `Consumer::try_read` (`Ok(None)` can mean the queue was replaced, and no error will
+  ever say so), and in the crate-level cross-process paragraph. `examples/readme_reader.rs`
+  and the README quick start now check `Queue::instance` after a second of silence and
+  re-open, instead of demonstrating the failure. (#13)
+
 ## [0.2.1] - 2026-09-19
 
 ### Changed

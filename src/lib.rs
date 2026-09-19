@@ -34,7 +34,11 @@
 //! ```
 //!
 //! Across processes, the producer calls [`Queue::create`] with a path (under `/dev/shm`
-//! on Linux) and consumers call [`Queue::open`] on the same path.
+//! on Linux) and consumers call [`Queue::open`] on the same path. When the producer
+//! restarts and calls `create` again, existing consumers are left attached to the old
+//! queue, which goes silent rather than failing: see [`Queue::instance`] for how a
+//! consumer tells that apart from an idle producer, and `examples/readme_reader.rs` for a
+//! reader that does.
 //!
 //! # What it is not
 //!
@@ -74,6 +78,14 @@ impl Queue {
     /// Put it in shared memory — `/dev/shm/<name>` on Linux — so the mapping never
     /// touches disk. `capacity` is the ring size in bytes; a power of two, at least
     /// [`layout::MIN_CAPACITY`].
+    ///
+    /// **Replacing, not truncating.** The new queue is built beside the target and renamed
+    /// into place, so it has a new inode. Readers already attached to the old queue are
+    /// not killed and not corrupted; they keep an intact mapping of a file that will never
+    /// change again, and from inside it a replaced writer is indistinguishable from an
+    /// idle one — [`Consumer::try_read`] simply returns `Ok(None)` forever. A reader that
+    /// must survive a writer restart compares [`Queue::instance`] with the value currently
+    /// at the path and re-opens when they differ. The crate does not do that for you.
     pub fn create(path: impl AsRef<Path>, capacity: u64) -> Result<Self> {
         Ok(Self::wrap(mapping::Mapping::create(
             path.as_ref(),

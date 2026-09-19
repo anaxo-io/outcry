@@ -1,12 +1,8 @@
 name: Release
 
-# Pushing a `vX.Y.Z` tag publishes the GitHub release for it, with the matching
-# CHANGELOG.md section as its notes. `taiki-e/create-gh-release-action` fails if that
-# section is missing, so the release and the changelog cannot disagree.
-#
-# There is no binary matrix here as there is in other repositories: this crate is a
-# library and has no `[[bin]]`. The equivalent artefact check is `cargo package`, which
-# builds the crate from exactly the files that would ship.
+# Pushing a `vX.Y.Z` tag publishes the GitHub release for it. The work is done by the
+# organisation's shared workflow; the procedure is in
+# https://github.com/anaxo-io/.github/blob/main/RELEASING.md.
 on:
   push:
     tags: ["v*"]
@@ -14,45 +10,6 @@ on:
 permissions:
   contents: write
 
-env:
-  CARGO_TERM_COLOR: always
-  RUSTFLAGS: -D warnings
-
 jobs:
-  verify:
-    name: verify the tag
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-
-      # The release action reads the changelog but not Cargo.toml, and a tag that
-      # disagrees with the version is a mistake worth catching before anything is public.
-      - name: Tag matches the crate version
-        run: |
-          tag="${GITHUB_REF_NAME#v}"
-          crate=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
-          if [ "$tag" != "$crate" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $crate"
-            exit 1
-          fi
-
-      # Deliberately not re-running the test suite. Releases are cut from main, every
-      # commit on main has been through the full CI matrix — fmt, clippy, tests, Miri,
-      # MSRV, deny — and this workflow runs once per release, so its build cache is always
-      # cold: repeating the suite costs ten minutes to learn what CI reported minutes
-      # earlier. `cargo package` is the check CI does not do, because it builds the crate
-      # from exactly the files that would ship.
-      - run: cargo package
-
-  create-release:
-    needs: verify
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: taiki-e/create-gh-release-action@v1
-        with:
-          changelog: CHANGELOG.md
-          token: ${{ secrets.GITHUB_TOKEN }}
+  release:
+    uses: anaxo-io/.github/.github/workflows/release-rust.yml@main

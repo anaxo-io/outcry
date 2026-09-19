@@ -95,79 +95,24 @@ something that cannot arrive.
 
 ## Releasing
 
-Releases are cut from `main` by pushing a tag. The tag is the trigger; everything else is
-one ordinary commit beforehand.
+The procedure is the organisation's, written once in
+[`anaxo-io/.github/RELEASING.md`](https://github.com/anaxo-io/.github/blob/main/RELEASING.md):
+changelog written as changes land, a version chosen by a person, one release commit, and a
+`vX.Y.Z` tag that triggers everything after. Read it before cutting a release.
 
-### The steps
+What is specific to this crate:
 
-1. **Write the changelog as you go.** `cargo release` moves the `## [Unreleased]` heading
-   but never writes what goes under it. Releasing with that section empty produces a dated
-   heading with nothing beneath it and a GitHub release with no notes.
-2. **Decide the version.** This is the judgement call and it is not automated. Pre-1.0, a
-   breaking change bumps the minor — and breaking includes things no tool infers from a
-   commit subject: a bumped MSRV, or a bumped `layout::VERSION`, which stops every
-   existing queue file opening.
-3. **Run `cargo release`.** It bumps `Cargo.toml`, dates the `## [Unreleased]` section and
-   opens a fresh one, moves the changelog links, runs the tests, commits as
-   `chore: release vX.Y.Z`, tags, and pushes.
-
-   ```bash
-   cargo release 0.3.0            # dry run: prints every edit and changes nothing
-   cargo release 0.3.0 --execute  # do it
-   ```
-
-   Pull `main` first. Rebase and squash merges both rewrite commits, so a local `main`
-   that merged a pull request through the web interface has diverged, and `cargo release`
-   refuses to run from there.
-
-`release.toml` holds the configuration, including `publish = false`.
-
-### What happens next
-
-Pushing the tag triggers `.github/workflows/release.yml`, which:
-
-1. refuses the tag if it does not match the version in `Cargo.toml` — the release action
-   reads `CHANGELOG.md` but never looks at `Cargo.toml`, so nothing else would catch it;
-2. runs `cargo package`, which builds the crate from exactly the files that would ship;
-3. hands over to [`taiki-e/create-gh-release-action`], which takes the notes from the
-   matching `CHANGELOG.md` section and fails if there is no such section, so the release
-   and the changelog cannot disagree.
-
-It deliberately does **not** re-run the test suite. Releases come from `main`, every commit
-there has passed the full matrix, and this workflow runs once per release — its build cache
-is always cold, so repeating the suite costs ten minutes to learn what CI reported minutes
-earlier. There is no binary matrix either, unlike repositories that ship executables: this
-crate is a library and has no `[[bin]]`.
-
-A pre-release tag such as `v0.2.0-rc1` is published as a pre-release automatically.
-
-[`taiki-e/create-gh-release-action`]: https://github.com/taiki-e/create-gh-release-action
-
-### Doing it by hand
-
-The same two files — `Cargo.toml`'s `version`, and `CHANGELOG.md`'s heading plus the two
-link definitions at the bottom — committed as `chore: release vX.Y.Z`, then:
-
-```bash
-git tag -a vX.Y.Z -m vX.Y.Z
-git push origin main vX.Y.Z
-```
-
-Push the branch before or with the tag. The workflow checks out the tag independently, but
-a tag that lands first publishes notes whose `[Unreleased]` compare link 404s until the
-branch catches up.
-
-### Two things that will surprise you
-
-**A tag event uses the workflow file from the tagged commit**, not from `main`. Fixing
-`release.yml` does nothing for tags that already exist, and a tag created before a fix
-lands will keep running the old version. `v0.1.0` and `v0.2.0` were both released by hand
-with `gh release create` for this reason.
-
-**Nothing is published to crates.io.** If that changes it becomes a step in this workflow
-behind a `CARGO_REGISTRY_TOKEN` secret, and it is worth remembering that a published
-version can be yanked but never replaced or reused — which is why it is not a command
-anyone can run locally.
+- `cargo release X.Y.Z --execute` does the release commit, tag and push; `release.toml`
+  holds the configuration and sets `publish = false`. Dry-run first by omitting
+  `--execute`. Pull `main` before running it.
+- A raised MSRV or a bumped `layout::VERSION` is a breaking change: the second stops every
+  existing queue file from opening. Neither is visible from a commit subject, which is why
+  the version is not chosen by a tool.
+- `.github/workflows/release.yml` calls the shared `release-rust.yml`, which verifies the
+  tag against `Cargo.toml`, runs `cargo package`, and creates the GitHub release from the
+  matching `CHANGELOG.md` section. Nothing goes to crates.io.
+- `v0.1.0` and `v0.2.0` were released by hand with `gh release create`, because a tag
+  event uses the workflow from the tagged commit and neither tag predates a working one.
 
 ## Commit messages
 

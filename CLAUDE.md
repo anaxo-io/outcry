@@ -58,9 +58,10 @@ single aggregate rate hides the thing the queue is about.
 - `CHANGELOG.md` follows Keep a Changelog. **Dependency bumps get a changelog entry too**,
   saying what the upgrade needed, not just the version pair.
 - Conventional-commit subjects. Do not commit unless asked.
-- Releases go out by pushing a `vX.Y.Z` tag; `.github/workflows/release.yml` builds the
-  GitHub release from the matching `CHANGELOG.md` section and fails if the tag, the
-  `Cargo.toml` version and that section disagree. The procedure is in `CONTRIBUTING.md`.
+- Releases go out by pushing a `vX.Y.Z` tag. The procedure is the organisation's, in
+  https://github.com/anaxo-io/.github/blob/main/RELEASING.md; `CONTRIBUTING.md` has
+  what is specific to this crate. Never re-copy the workflow body here — `release.yml`
+  calls the shared one.
 - Run `gitleaks protect --staged` before every push.
 - Dependabot must not bump `dtolnay/rust-toolchain`: that tag names a Rust release, not an
   action version, so a bump asks CI to install a toolchain that does not exist. The ignore

@@ -74,22 +74,27 @@ CI runs all of these plus an MSRV check against Rust 1.89 and `cargo deny check`
 Releases are cut from `main` by pushing a tag. The tag is the trigger; everything else is
 one ordinary commit beforehand.
 
-1. **Decide the version.** Pre-1.0, a breaking change bumps the minor: a removed feature,
-   a changed public signature, a bumped MSRV, or a bumped `layout::VERSION`, since the
-   last stops existing queue files opening.
-2. **Write the release commit.** It touches exactly two files:
-   - `Cargo.toml`: the `version` field.
-   - `CHANGELOG.md`: rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`, add a fresh
-     empty `## [Unreleased]` above it, and update the link definitions at the bottom so
-     `[Unreleased]` compares against the new tag and `[X.Y.Z]` points at its release.
-
-   Subject: `chore: release vX.Y.Z`.
-3. **Tag and push.**
+1. **Decide the version.** This is the judgement call and it is not automated. Pre-1.0, a
+   breaking change bumps the minor — and breaking includes things no tool infers from a
+   commit subject: a bumped MSRV, or a bumped `layout::VERSION`, which stops every
+   existing queue file opening.
+2. **Run `cargo release`.** It bumps `Cargo.toml`, dates the `## [Unreleased]` section and
+   opens a fresh one, moves the changelog links, runs the tests, commits as
+   `chore: release vX.Y.Z`, tags, and pushes.
 
    ```bash
-   git tag -a v0.2.0 -m v0.2.0
-   git push origin main v0.2.0
+   cargo release 0.3.0            # dry run: prints every edit and changes nothing
+   cargo release 0.3.0 --execute  # do it
    ```
+
+   `release.toml` holds the configuration. It sets `publish = false`: nothing goes to
+   crates.io.
+
+Doing it by hand is the same two files — `Cargo.toml`'s `version`, and `CHANGELOG.md`'s
+heading plus the two link definitions at the bottom — followed by
+`git tag -a vX.Y.Z -m vX.Y.Z` and `git push origin main vX.Y.Z`. Push the branch before
+or with the tag: the workflow checks out the tag independently, but a tag that lands
+first publishes notes whose `[Unreleased]` compare link 404s until the branch catches up.
 
 `.github/workflows/release.yml` does the rest. It refuses the tag if it does not match the
 version in `Cargo.toml`, runs the tests and `cargo package` — the latter builds the crate

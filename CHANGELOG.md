@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- README: depend on `outcry = "0.2"` from crates.io rather than a git tag, with crates.io
+  and docs.rs badges. The 0.2.0 page on crates.io keeps the old form — and a stale
+  `v0.1.0` at that — since a published version cannot be edited; this release exists to
+  correct what crates.io shows.
+
 ## [0.2.0] - 2026-09-19
 
 ### Fixed

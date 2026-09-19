@@ -168,3 +168,107 @@ impl Consumer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::layout::{FRAME_HEADER, PAD};
+
+    const CAP: u64 = 4096;
+
+    /// An anonymous queue whose counters have been set by hand, as a corrupted or hostile
+    /// peer could leave them. Anonymous rather than file-backed so that these run under
+    /// Miri, which is the only tool that sees the undefined behaviour these guards exist
+    /// to prevent: the reads in question land inside the mapping, where a sanitiser
+    /// cannot tell them from valid ones.
+    fn crafted(published: u64) -> Arc<Mapping> {
+        let map = Mapping::anon(CAP).unwrap();
+        map.published().store(published, Ordering::Release);
+        map.reserved().store(published, Ordering::Release);
+        Arc::new(map)
+    }
+
+    fn publish(map: &Mapping, to: u64) {
+        map.reserved().store(to, Ordering::Release);
+        map.published().store(to, Ordering::Release);
+    }
+
+    #[test]
+    fn an_absurd_length_is_refused_before_it_is_arithmetic() {
+        let map = crafted(0);
+        let mut consumer = Consumer::new(Arc::clone(&map));
+
+        // One below the pad marker: `frame_size` would overflow rounding it up.
+        map.poke_ring(0, u64::MAX - 1);
+        publish(&map, 16);
+
+        let mut buf = [0u8; 64];
+        assert!(matches!(
+            consumer.try_read(&mut buf),
+            Err(Error::Overrun { .. })
+        ));
+    }
+
+    #[test]
+    fn a_frame_running_past_the_ring_end_is_refused() {
+        // Eight bytes from the end: only a length word fits, so a compliant producer
+        // would have written a pad frame here.
+        let map = crafted(CAP - 8);
+        let mut consumer = Consumer::new(Arc::clone(&map));
+
+        // A peer claims a 16-byte frame anyway. Its payload would start at ring index
+        // `CAP`, one word past the end of the mapping.
+        map.poke_ring((CAP - 8) as usize, 1);
+        publish(&map, CAP + 8);
+
+        let mut buf = [0u8; 64];
+        assert!(matches!(
+            consumer.try_read(&mut buf),
+            Err(Error::Overrun { .. })
+        ));
+    }
+
+    #[test]
+    fn a_length_beyond_the_maximum_payload_is_refused() {
+        let map = crafted(0);
+        let mut consumer = Consumer::new(Arc::clone(&map));
+
+        map.poke_ring(0, crate::layout::max_payload(CAP) as u64 + 1);
+        publish(&map, CAP / 2);
+
+        let mut buf = [0u8; 4096];
+        assert!(matches!(
+            consumer.try_read(&mut buf),
+            Err(Error::Overrun { .. })
+        ));
+    }
+
+    #[test]
+    fn a_pad_word_at_the_end_of_the_ring_wraps_without_reading_past_it() {
+        let map = crafted(CAP - 8);
+        let mut consumer = Consumer::new(Arc::clone(&map));
+
+        // Pad to the end of this lap, then a real empty frame at the start of the next.
+        map.poke_ring((CAP - 8) as usize, PAD);
+        map.poke_ring(0, 0);
+        publish(&map, CAP + FRAME_HEADER as u64);
+
+        let mut buf = [0u8; 64];
+        assert_eq!(consumer.try_read(&mut buf).unwrap(), Some(0));
+    }
+
+    #[test]
+    fn a_well_formed_frame_is_still_accepted() {
+        // The control: the guards must refuse corruption without refusing real frames.
+        let map = crafted(0);
+        let mut consumer = Consumer::new(Arc::clone(&map));
+
+        map.poke_ring(0, 8);
+        map.poke_ring(FRAME_HEADER, u64::from_ne_bytes(*b"abcdefgh"));
+        publish(&map, 16);
+
+        let mut buf = [0u8; 64];
+        assert_eq!(consumer.try_read(&mut buf).unwrap(), Some(8));
+        assert_eq!(&buf[..8], b"abcdefgh");
+    }
+}

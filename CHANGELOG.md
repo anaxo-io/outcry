@@ -76,6 +76,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Unit tests in `src/consumer.rs` that craft malformed ring states over anonymous memory,
+  so they run under Miri — and a CI step, `cargo miri test --lib`, that runs them. The
+  file-backed equivalents in `tests/malformed.rs` cannot: Miri has no file mapping, so
+  they only ever showed that an `Err` came back, never that no out-of-bounds pointer was
+  formed. Removing the ring-end check makes Miri report undefined behaviour one word past
+  the end of the mapping, which is what gives these tests their value. ASan was considered
+  and rejected: it guards `malloc` allocations with redzones and knows nothing about the
+  logical end of an `mmap` region, so the read in question is invisible to it. (#3)
 - `Queue::instance`, the identifier assigned when a queue is created. Because a replaced
   queue leaves its readers mapped to an intact file that will never change again, a
   replaced writer and a merely idle one are indistinguishable from inside the mapping;

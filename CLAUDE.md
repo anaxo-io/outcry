@@ -21,6 +21,7 @@ cargo fmt --all
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 cargo doc --no-deps --all-features
+cargo +nightly miri test --lib
 cargo +nightly miri test --test behaviour -- --skip file_backed --skip open_rejects
 ```
 

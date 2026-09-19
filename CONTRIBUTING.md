@@ -20,6 +20,7 @@ cargo fmt --all
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 cargo doc --no-deps --all-features
+cargo +nightly miri test --lib
 cargo +nightly miri test --test behaviour -- --skip file_backed --skip open_rejects
 ```
 
@@ -46,6 +47,15 @@ CI runs all of these plus an MSRV check against Rust 1.89 and `cargo deny check`
   before any pointer is formed from them; `tests/malformed.rs` crafts the states that
   matter. An unaligned or out-of-range position turns a safe call into undefined
   behaviour, so a new field read from the mapping needs a new check and a new test there.
+- **Malformed input gets a unit test, not just an integration test.** `tests/malformed.rs`
+  crafts queue *files*, which Miri cannot map, so those tests only prove that an `Err` came
+  back. The equivalents in `src/consumer.rs` craft the same states over anonymous memory
+  and therefore run under Miri, which is what proves no pointer was formed out of bounds.
+  A sanitiser is not an alternative: ASan guards `malloc` allocations with redzones and
+  knows nothing about the logical end of an `mmap` region, so a read past the ring but
+  inside the mapping is invisible to it. Verified — removing the ring-end check makes Miri
+  report undefined behaviour at `copy.rs` one word past the mapping, and makes ASan report
+  nothing at all.
 - **The sound copy path must pass Miri.** It is the reason this crate exists as a Rust
   crate rather than a port. If a change makes Miri unhappy on the default features, the
   change is wrong, not Miri.

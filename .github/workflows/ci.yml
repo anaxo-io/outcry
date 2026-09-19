@@ -49,6 +49,9 @@ jobs:
       # rust-toolchain.toml pins stable, which would override the nightly installed above.
       - run: rm -f rust-toolchain.toml
       - run: cargo miri setup
+      - run: cargo miri test --lib
+        env:
+          MIRIFLAGS: -Zmiri-disable-isolation
       - run: cargo miri test --test behaviour -- --skip file_backed --skip open_rejects
         env:
           MIRIFLAGS: -Zmiri-disable-isolation

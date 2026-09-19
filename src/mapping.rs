@@ -280,6 +280,29 @@ impl Mapping {
         self.capacity - 1
     }
 
+    /// Write one word straight into the ring, bypassing the producer.
+    ///
+    /// Test-only. It exists so unit tests can craft the ring states a corrupted or hostile
+    /// peer could leave, and check that the consumer refuses them *before* forming a
+    /// pointer from them. Those tests run under Miri; `tests/malformed.rs` cannot, because
+    /// Miri has no file mapping, and a sanitiser is no substitute — ASan guards `malloc`
+    /// allocations with redzones and knows nothing about the logical end of an `mmap`
+    /// region, so a read past the ring but inside the mapping is invisible to it.
+    #[cfg(test)]
+    pub(crate) fn poke_ring(&self, idx: usize, value: u64) {
+        assert!(
+            idx.is_multiple_of(FRAME_ALIGN),
+            "ring writes are word-aligned"
+        );
+        assert!(
+            idx + FRAME_ALIGN <= self.capacity as usize,
+            "inside the ring"
+        );
+        // SAFETY: the assertions above put `idx` 8-aligned and within the ring, `base`
+        // carries write permission, and a test holds the only handle.
+        unsafe { crate::copy::write_word(self.buffer_ptr().add(idx), value) };
+    }
+
     /// Pointer to the first buffer byte. All ring arithmetic is relative to this.
     pub(crate) fn buffer_ptr(&self) -> *mut u8 {
         // SAFETY: in bounds; the mapping is `BUFFER_OFFSET + capacity` bytes.

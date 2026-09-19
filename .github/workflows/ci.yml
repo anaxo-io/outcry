@@ -11,8 +11,52 @@ env:
   RUSTFLAGS: -D warnings
 
 jobs:
+  # Which jobs need to run. Doc-only changes cannot affect a compiler, so rebuilding the
+  # crate six ways to check a typo is pure waiting.
+  #
+  # This gates each job with `if:` rather than putting `paths-ignore:` on the triggers
+  # above, and the difference matters: a workflow skipped by a path filter never reports
+  # its checks at all, and required checks that never report block a pull request forever.
+  # A job skipped by `if:` does report, as skipped, which branch protection accepts.
+  changes:
+    name: what changed
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # Anything that is not a pull request — a push to main, a merge queue entry —
+          # runs everything. Only a pull request has two ends to compare.
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            echo "not a pull request: running everything"
+            exit 0
+          fi
+          changed=$(git diff --name-only "$BASE" "$HEAD")
+          echo "changed files:"; echo "$changed"
+          # Prose only: markdown, licences and the issue/PR templates. Note what is *not*
+          # here — Cargo.toml, deny.toml, rust-toolchain.toml, anything under src/, tests/
+          # or benches/, and the workflows themselves.
+          if echo "$changed" | grep -qvE '^([^/]*\.md|LICENSE-[A-Z0-9-]+|\.github/(ISSUE_TEMPLATE/.*|PULL_REQUEST_TEMPLATE\.md))$'; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"
+            echo "prose only: skipping the build jobs"
+          fi
+
   lint:
     name: fmt + clippy
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -26,6 +70,8 @@ jobs:
 
   test:
     name: test
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -39,6 +85,8 @@ jobs:
     # The sound copy path must be free of undefined behaviour under the Rust abstract
     # machine. Miri cannot map files, so only the anonymous-memory tests run here.
     name: miri (sound copy)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -58,6 +106,8 @@ jobs:
 
   docs:
     name: rustdoc
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -70,6 +120,8 @@ jobs:
 
   msrv:
     name: msrv (1.89)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -81,6 +133,8 @@ jobs:
 
   deny:
     name: cargo-deny
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

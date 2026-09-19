@@ -12,6 +12,12 @@ use crate::mapping::Mapping;
 ///
 /// A consumer created after the producer has written sees only what is written from
 /// then on: it starts at the current head, not at zero.
+///
+/// A consumer is bound to the queue it was made from. If the producer restarts through
+/// [`Queue::create`](crate::Queue::create), that queue is replaced by a new file and this
+/// consumer keeps reading the old one, which never changes again. Nothing here reports
+/// that; compare [`Queue::instance`](crate::Queue::instance) with the value at the path
+/// and make a new consumer from a fresh [`Queue::open`](crate::Queue::open).
 pub struct Consumer {
     map: Arc<Mapping>,
     /// Bytes consumed so far.
@@ -64,6 +70,11 @@ impl Consumer {
     /// - [`Error::BufferTooSmall`] — `out` cannot hold the frame; nothing was consumed.
     /// - [`Error::Overrun`] — the writer lapped this reader. `out` holds garbage and the
     ///   position is invalid until [`resync`](Self::resync).
+    ///
+    /// `Ok(None)` also means "the writer restarted and this queue was replaced": the two
+    /// cases are identical from inside the mapping, and no error will ever arrive for the
+    /// second. A reader that has seen `None` for longer than its writer is normally quiet
+    /// should check [`Queue::instance`](crate::Queue::instance) against the path.
     ///
     /// Never blocks.
     pub fn try_read(&mut self, out: &mut [u8]) -> Result<Option<usize>> {

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `release.toml` was shipping in the published crate. It is cargo-release configuration,
+  of use only to whoever cuts a release and meaningless to a downstream build, so it joins
+  `CLAUDE.md` and the toolchain pin in `exclude`. 0.2.1 contains it; from this release it
+  does not.
+
 ### Changed
 
 - The writer-restart contract is now stated where a reader lands: on `Queue::create`

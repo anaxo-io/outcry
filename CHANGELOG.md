@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-09-20
+
 ### Fixed
 
 - `release.toml` was shipping in the published crate. It is cargo-release configuration,
@@ -184,7 +186,8 @@ Nanoseconds Matter*, in Rust.
   to use instead.
 - Miri covers the sound copy path on anonymous memory only; it cannot map files.
 
-[Unreleased]: https://github.com/anaxo-io/outcry/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/anaxo-io/outcry/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/anaxo-io/outcry/releases/tag/v0.2.2
 [0.2.1]: https://github.com/anaxo-io/outcry/releases/tag/v0.2.1
 [0.2.0]: https://github.com/anaxo-io/outcry/releases/tag/v0.2.0
 [0.1.0]: https://github.com/anaxo-io/outcry/releases/tag/v0.1.0
